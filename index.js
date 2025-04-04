@@ -21,51 +21,135 @@ app.get("/", (req, res) => {
 const userSockets = {}; // Store user IDs and their socket IDs
 const userMessages = {}; // Store messages for each user
 
-io.on("connection", (socket) => {
-  console.log("A user connected:", socket.id);
+const express = require('express');
+const http = require('http');
+const socketIo = require('socket.io');
+const moment = require('moment');
+const supabase = require('./supabaseClient');  // Make sure to configure this
+const app = express();
+const server = http.createServer(app);
+const io = socketIo(server);
 
-  socket.on("setUserId", (userId) => {
-    userSockets[userId] = socket.id;
-    userMessages[userId] = userMessages[userId] || []; // Initialize message array
-    console.log(`User ${userId} connected with socket ${socket.id}`);
+app.use(express.json());
 
-    // Send any pending messages to the user upon connection
-    if (userMessages[userId].length > 0) {
-      userMessages[userId].forEach((message) => {
-        socket.emit("message", message);
-      });
-      userMessages[userId] = []; // Clear the messages after sending
-    }
-  });
+// Socket.io connection handling
+io.on('connection', (socket) => {
+    console.log('A user connected: ' + socket.id);
 
-  socket.on("sendMessage", ({ senderId, receiverId, message }) => {
-    console.log(`Message from ${senderId} to ${receiverId}: ${message}`);
+    // Listening for a new message
+    socket.on('send_message', async (messageData) => {
+        try {
+            const { sender_id, sender_name, reciver_id, reciver_name, message } = messageData;
+            const time = moment().format("YYYY-MM-DD HH:mm:ss");
+            if (!sender_id || !sender_name || !reciver_id || !reciver_name || !message) {
+                socket.emit('message_error', { msg: 'sender_id, sender_name, reciver_name, reciver_id, and message are required' });
+                return;
+            }
 
-    const receiverSocketId = userSockets[receiverId];
+            // Save message to database
+            const { error } = await supabase
+                .from('message_data')
+                .insert([{ sender_id, sender_name, reciver_id, reciver_name, message, time }]);
 
-    if (receiverSocketId) {
-      // Receiver is online, send the message directly
-      io.to(receiverSocketId).emit("message", { senderId, message });
-    } else {
-      // Receiver is offline, store the message
-      userMessages[receiverId] = userMessages[receiverId] || [];
-      userMessages[receiverId].push({ senderId, message });
-    }
-  });
+            if (error) {
+                console.error("Supabase error:", error);
+                socket.emit('message_error', { msg: error.message || "Database error" });
+                return;
+            }
 
-  socket.on("disconnect", () => {
-    // Remove the user's socket ID when they disconnect
-    for (const userId in userSockets) {
-      if (userSockets[userId] === socket.id) {
-        delete userSockets[userId];
-        console.log(`User ${userId} disconnected`);
-        break;
-      }
-    }
-    console.log("A user disconnected:", socket.id);
-  });
+            // Emit the message to the receiver
+            io.to(reciver_id).emit('receive_message', { sender_id, sender_name, reciver_id, reciver_name, message, time });
+            socket.emit('message_sent', { msg: 'Message sent successfully' });
+
+        } catch (e) {
+            console.error("API error:", e);
+            socket.emit('message_error', { msg: e.message || "Something went wrong while sending the message" });
+        }
+    });
+
+    // Listen for user disconnect
+    socket.on('disconnect', () => {
+        console.log('A user disconnected: ' + socket.id);
+    });
 });
 
-server.listen(4000, () => {
-  console.log("Server is running on port 4000");
+// Start server
+const PORT = 5000;
+server.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
 });
+
+// import React, { useState, useEffect } from 'react';
+// import io from 'socket.io-client';
+
+// const socket = io('http://localhost:5000'); // Server URL
+
+// function MessagingApp() {
+//     const [message, setMessage] = useState('');
+//     const [messages, setMessages] = useState([]);
+//     const [userDetails, setUserDetails] = useState({
+//         sender_id: 1,
+//         sender_name: 'User1',
+//         reciver_id: 2,
+//         reciver_name: 'User2'
+//     });
+
+//     useEffect(() => {
+//         socket.on('receive_message', (data) => {
+//             setMessages((prevMessages) => [...prevMessages, data]);
+//         });
+
+//         socket.on('message_sent', (data) => {
+//             console.log(data.msg);
+//         });
+
+//         socket.on('message_error', (error) => {
+//             console.log(error.msg);
+//         });
+
+//         return () => {
+//             socket.off('receive_message');
+//             socket.off('message_sent');
+//             socket.off('message_error');
+//         };
+//     }, []);
+
+//     const sendMessage = () => {
+//         if (!message) return;
+
+//         const messageData = {
+//             sender_id: userDetails.sender_id,
+//             sender_name: userDetails.sender_name,
+//             reciver_id: userDetails.reciver_id,
+//             reciver_name: userDetails.reciver_name,
+//             message: message
+//         };
+
+//         socket.emit('send_message', messageData);
+//         setMessage(''); // Clear message input after sending
+//     };
+
+//     return (
+//         <div>
+//             <div>
+//                 <h3>Chat with {userDetails.reciver_name}</h3>
+//                 <div>
+//                     {messages.map((msg, index) => (
+//                         <div key={index}>
+//                             <strong>{msg.sender_name}: </strong>{msg.message}
+//                         </div>
+//                     ))}
+//                 </div>
+//             </div>
+//             <input
+//                 type="text"
+//                 value={message}
+//                 onChange={(e) => setMessage(e.target.value)}
+//                 placeholder="Type a message"
+//             />
+//             <button onClick={sendMessage}>Send</button>
+//         </div>
+//     );
+// }
+
+// export default MessagingApp;
