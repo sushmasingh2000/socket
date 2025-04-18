@@ -21,16 +21,8 @@ app.get("/", (req, res) => {
 const userSockets = {}; // Store user IDs and their socket IDs
 const userMessages = {}; // Store messages for each user
 
-const express = require('express');
-const http = require('http');
 const socketIo = require('socket.io');
 const moment = require('moment');
-const supabase = require('./supabaseClient');  // Make sure to configure this
-const app = express();
-const server = http.createServer(app);
-const io = socketIo(server);
-
-app.use(express.json());
 
 // Socket.io connection handling
 io.on('connection', (socket) => {
